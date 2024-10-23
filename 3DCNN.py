@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import tensorflow as tf
+import random
 from tensorflow.keras import layers, Input, Model, regularizers
 from tensorflow.keras.callbacks import ReduceLROnPlateau, ModelCheckpoint, EarlyStopping
 from sklearn.base import BaseEstimator, RegressorMixin
@@ -8,6 +9,12 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split
 from rdkit import Chem
 from rdkit.Chem import Descriptors, rdMolDescriptors, QED
+
+# 랜덤 시드 설정
+seed_value = 325
+np.random.seed(seed_value)
+tf.random.set_seed(seed_value)
+random.seed(seed_value)
 
 # TPU 초기화 시도
 try:
