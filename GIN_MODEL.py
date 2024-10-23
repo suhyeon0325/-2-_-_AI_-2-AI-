@@ -10,7 +10,7 @@ from torch_geometric.data import Data, DataLoader
 from sklearn.model_selection import train_test_split
 
 # 랜덤 시드 설정
-seed_value = 325
+seed_value = 1
 np.random.seed(seed_value)
 torch.manual_seed(seed_value)
 if torch.cuda.is_available():

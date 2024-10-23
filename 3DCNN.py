@@ -11,7 +11,7 @@ from rdkit import Chem
 from rdkit.Chem import Descriptors, rdMolDescriptors, QED
 
 # 랜덤 시드 설정
-seed_value = 325
+seed_value = 1
 np.random.seed(seed_value)
 tf.random.set_seed(seed_value)
 random.seed(seed_value)
@@ -159,5 +159,4 @@ test_preds = model.predict([test_voxel_data, test_rdkit_features, test_smiles_en
 # 예측 결과 저장
 ic50_predictions = 10 ** (9 - test_preds.flatten())
 submission = pd.DataFrame({'ID': test['ID'], 'IC50_nM': ic50_predictions})
-submission = test[['ID', 'IC50_nM']]
 submission.to_csv('submission_3dcnn.csv', index=False)
