@@ -9,6 +9,7 @@ from sklearn.model_selection import train_test_split
 from rdkit import Chem
 from rdkit.Chem import Descriptors, rdMolDescriptors, QED
 
+# TPU 초기화 시도
 try:
     tpu = tf.distribute.cluster_resolver.TPUClusterResolver()
     tf.config.experimental_connect_to_cluster(tpu)
@@ -19,76 +20,14 @@ except ValueError:
     strategy = tf.distribute.get_strategy()
     print("Default strategy used")
 
-class MyKerasRegressor(BaseEstimator, RegressorMixin):
-    def __init__(self, build_fn, voxel_input_shape, rdkit_input_shape, smiles_input_shape, enc, max_smiles_len, optimizer='adam', dropout_rate=0.5, learning_rate=0.001, **kwargs):
-        self.build_fn = build_fn
-        self.optimizer = optimizer
-        self.dropout_rate = dropout_rate
-        self.learning_rate = learning_rate
-        self.voxel_input_shape = voxel_input_shape
-        self.rdkit_input_shape = rdkit_input_shape
-        self.smiles_input_shape = smiles_input_shape
-        self.enc = enc
-        self.max_smiles_len = max_smiles_len
-        self.kwargs = kwargs
-        self.model = None
-    
-    def fit(self, X, y, callbacks=None, **fit_params):
-        X_voxel, X_rdkit, X_smiles = X
-        self.model = self.build_fn(
-            voxel_input_shape=self.voxel_input_shape,
-            rdkit_input_shape=self.rdkit_input_shape,
-            smiles_input_shape=self.smiles_input_shape,
-            enc=self.enc,
-            max_smiles_len=self.max_smiles_len,
-            optimizer=self.optimizer,
-            dropout_rate=self.dropout_rate,
-            learning_rate=self.learning_rate,
-            **self.kwargs
-        )
-        self.model.compile(
-            optimizer=tf.keras.optimizers.get(self.optimizer),
-            loss='mean_squared_error',
-            metrics=[tf.keras.metrics.RootMeanSquaredError()]
-        )
-        self.model.fit([X_voxel, X_rdkit, X_smiles], y, callbacks=callbacks, **fit_params)
-        return self
-    
-    def predict(self, X, **predict_params):
-        X_voxel, X_rdkit, X_smiles = X
-        return self.model.predict([X_voxel, X_rdkit, X_smiles], **predict_params)
-    
-    def score(self, X, y, **score_params):
-        predictions = self.predict(X)
-        return -np.mean((predictions - y) ** 2)
-    
-    def get_params(self, deep=True):
-        return {
-            "optimizer": self.optimizer,
-            "dropout_rate": self.dropout_rate,
-            "learning_rate": self.learning_rate,
-            "build_fn": self.build_fn,
-            "voxel_input_shape": self.voxel_input_shape,
-            "rdkit_input_shape": self.rdkit_input_shape,
-            "smiles_input_shape": self.smiles_input_shape,
-            "enc": self.enc,
-            "max_smiles_len": self.max_smiles_len,
-            **self.kwargs
-        }
-    
-    def set_params(self, **params):
-        for param, value in params.items():
-            setattr(self, param, value)
-        return self
-
+# 데이터 로드
 train = pd.read_csv("data/train.csv").drop(6341)
 test = pd.read_csv("data/test.csv")
-
 train['pIC50'] = -np.log10(train['IC50_nM']) + 9
-
 train_voxel_data = np.expand_dims(np.load('data/train_voxel.npy'), axis=-1)
 test_voxel_data = np.expand_dims(np.load('data/test_voxel.npy'), axis=-1)
 
+# RDKit로 분자 특성 계산
 def calculate_rdkit_features(smiles):
     mol = Chem.MolFromSmiles(smiles)
     features = {
@@ -116,6 +55,7 @@ scaler_rdkit = MinMaxScaler()
 train_rdkit_features = scaler_rdkit.fit_transform(train_rdkit_features)
 test_rdkit_features = scaler_rdkit.transform(test_rdkit_features)
 
+# SMILES 인코딩
 max_smiles_len = max(train['Smiles'].apply(len).max(), test['Smiles'].apply(len).max())
 enc = {'l': 1, 'y': 2, '@': 3, '3': 4, 'H': 5, 'S': 6, 'F': 7, 'C': 8, 'r': 9, 's': 10, '/': 11, 'c': 12, 'o': 13,
        '+': 14, 'I': 15, '5': 16, '(': 17, '2': 18, ')': 19, '9': 20, 'i': 21, '#': 22, '6': 23, '8': 24, '4': 25,
@@ -137,10 +77,12 @@ scaler_smiles = MinMaxScaler()
 train_smiles_encoded = scaler_smiles.fit_transform(train_smiles_encoded)
 test_smiles_encoded = scaler_smiles.transform(test_smiles_encoded)
 
+# 입력 데이터 shape 설정
 voxel_input_shape = train_voxel_data.shape[1:]
 rdkit_input_shape = (train_rdkit_features.shape[1],)
 smiles_input_shape = (max_smiles_len,)
 
+# cnn 모델 정의
 def cnn_model(voxel_input_shape, rdkit_input_shape, smiles_input_shape, enc, max_smiles_len):
     l2_reg = regularizers.l2(0.0001)
 
@@ -177,6 +119,7 @@ def cnn_model(voxel_input_shape, rdkit_input_shape, smiles_input_shape, enc, max
     
     return model
 
+# 학습 환경 설정
 reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.7, patience=10, min_lr=1e-6, verbose=1)
 checkpoint = ModelCheckpoint('best_model.keras', monitor='val_loss', save_best_only=True, mode='min', verbose=1)
 def get_early_stopping_callback():
@@ -186,9 +129,9 @@ y_train = train['pIC50'].values
 
 callbacks = [checkpoint, reduce_lr, get_early_stopping_callback()]
 
+# 모델 훈련
 with strategy.scope():
     model = cnn_model(voxel_input_shape, rdkit_input_shape, smiles_input_shape, enc, max_smiles_len)
-
 
     model.fit(
         [train_voxel_data, train_rdkit_features, train_smiles_encoded],
@@ -199,10 +142,15 @@ with strategy.scope():
         callbacks=callbacks
     )
 
+# 평가
 final_score = model.evaluate([train_voxel_data, train_rdkit_features, train_smiles_encoded], y_train, verbose=0)
 print("Final Validation RMSE:", final_score[1])
 
+# 테스트 데이터 예측
 test_preds = model.predict([test_voxel_data, test_rdkit_features, test_smiles_encoded], batch_size=32)
+
+# 예측 결과 저장
 ic50_predictions = 10 ** (9 - test_preds.flatten())
 submission = pd.DataFrame({'ID': test['ID'], 'IC50_nM': ic50_predictions})
+submission = test[['ID', 'IC50_nM']]
 submission.to_csv('submission_3dcnn.csv', index=False)
